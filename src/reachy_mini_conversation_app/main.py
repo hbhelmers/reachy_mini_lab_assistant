@@ -114,12 +114,37 @@ def run(
 
     head_wobbler = HeadWobbler(set_speech_offsets=movement_manager.set_speech_offsets)
 
+    # ---- RAG INIT ----
+    from rag.store import VectorStore
+    from rag.embeddings import Embeddings
+    from rag.sync import ContentSyncWorker
+
+    logger.info("Initializing RAG system...")
+
+    vector_store = VectorStore("./data/qdrant")
+    embeddings = Embeddings(api_key=os.getenv("OPENAI_API_KEY"))
+
+    sync_worker = ContentSyncWorker(
+        content_dir="./data/rag_sources",
+        store=vector_store,
+        embeddings=embeddings,
+        state_path="./data/ingest_state.json",
+    )
+
+    sync_worker.start()
+    sync_worker.ready.wait()
+
+    logger.info("RAG ready")
+    #------------------
+
     deps = ToolDependencies(
         reachy_mini=robot,
         movement_manager=movement_manager,
         camera_worker=camera_worker,
         vision_manager=vision_manager,
         head_wobbler=head_wobbler,
+        vector_store=vector_store,
+        embeddings=embeddings,
     )
     current_file_path = os.path.dirname(os.path.abspath(__file__))
     logger.debug(f"Current file absolute path: {current_file_path}")

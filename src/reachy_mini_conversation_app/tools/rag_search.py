@@ -1,48 +1,49 @@
-from pathlib import Path
-import json
-import faiss
-import numpy as np
-from sentence_transformers import SentenceTransformer
+import logging
+from typing import Any, Dict
 from reachy_mini_conversation_app.tools.core_tools import Tool, ToolDependencies
 
-INDEX_DIR = Path("rag/index")
+logger = logging.getLogger(__name__)
 
 class RagSearch(Tool):
     name = "rag_search"
-    description = "Søker i kunnskapsbasen for informasjon om labutstyr, utlån, regler og prosedyrer."
+    description = "Search the lab knowledge base for relevant information."
     parameters_schema = {
         "type": "object",
         "properties": {
-            "query": {"type": "string", "description": "Spørsmålet som skal søkes etter"},
-            "top_k": {"type": "integer", "default": 3}
+            "query": {
+                "type": "string",
+                "description": "The question to look up in the knowledge base."
+            },
+            "category": {
+                "type": "string",
+                "description": "Optional category filter."
+            },
         },
-        "required": ["query"]
+        "required": ["query"],
     }
 
-    def __init__(self):
-        self.index = faiss.read_index(str(INDEX_DIR / "faiss.index"))
-        self.metadata = json.loads((INDEX_DIR / "metadata.json").read_text(encoding="utf-8"))
-        self.model = SentenceTransformer("sentence-transformers/paraphrase-multilingual-MiniLM-L12-v2")
+    async def __call__(self, deps: ToolDependencies, **kwargs: Any) -> Dict[str, Any]:
+        query = kwargs.get("query", "").strip()
+        category = kwargs.get("category") or None
 
-    async def __call__(self, deps: ToolDependencies, **kwargs):
-        query = kwargs["query"]
-        top_k = int(kwargs.get("top_k", 3))
+        if not query:
+            return {"error": "query is required"}
 
-        q = self.model.encode([query], convert_to_numpy=True, normalize_embeddings=True).astype("float32")
-        scores, indices = self.index.search(q, top_k)
+        if getattr(deps, "vector_store", None) is None or getattr(deps, "embeddings", None) is None:
+            return {"error": "RAG pipeline not available"}
 
-        results = []
-        for score, idx in zip(scores[0], indices[0]):
-            if idx < 0:
-                continue
-            item = self.metadata[idx]
-            results.append({
-                "source": item["source"],
-                "score": float(score),
-                "text": item["text"]
-            })
+        try:
+            query_vector = deps.embeddings.embed_one(query)
+            results = deps.vector_store.search(query_vector, category=category, limit=3)
 
-        if not results:
-            return {"results": [], "message": "Fant ingen relevant informasjon."}
+            if not results:
+                return {"answer": "Jeg finner ikke dette i dokumentasjonen."}
 
-        return {"results": results}
+            context = "\n\n---\n\n".join(
+                f"[{r['source']}]\n{r['text']}" for r in results
+            )
+            return {"context": context}
+
+        except Exception as e:
+            logger.error("rag_search failed: %s", e, exc_info=True)
+            return {"error": f"Knowledge base lookup failed: {e}"}
