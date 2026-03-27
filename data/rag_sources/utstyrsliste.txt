@@ -1,5 +1,0 @@
-Læringslabben har følgende utstyr tilgjengelig:
-- Marshall Electronics CV503-U3 kamera
-- Libec TH-650 kamerastativ
-- VUZE XR VR kamera
-- VR-briller (Meta Quest)

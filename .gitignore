@@ -13,6 +13,12 @@ env/
 # Environment variables
 .env
 
+# RAG
+data/qdrant/
+data/ingest_state.json
+data/.lock
+data/meta.json
+
 # Build and distribution
 build/
 dist/

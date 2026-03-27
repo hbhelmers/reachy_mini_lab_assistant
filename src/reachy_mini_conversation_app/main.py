@@ -42,7 +42,6 @@ def run(
     instance_path: Optional[str] = None,
 ) -> None:
     """Run the Reachy Mini conversation app."""
-    # Putting these dependencies here makes the dashboard faster to load when the conversation app is installed
     from reachy_mini_conversation_app.moves import MovementManager
     from reachy_mini_conversation_app.console import LocalStream
     from reachy_mini_conversation_app.openai_realtime import OpenaiRealtimeHandler
@@ -90,7 +89,6 @@ def run(
             logger.error("Please check your configuration and try again.")
             sys.exit(1)
 
-    # Auto-enable Gradio in simulation mode (both MuJoCo for daemon and mockup-sim for desktop app)
     status = robot.client.get_status()
     if isinstance(status, dict):
         simulation_enabled = status.get("simulation_enabled", False)
@@ -114,15 +112,20 @@ def run(
 
     head_wobbler = HeadWobbler(set_speech_offsets=movement_manager.set_speech_offsets)
 
-    # ---- RAG INIT ----
-    from rag.store import VectorStore
-    from rag.embeddings import Embeddings
-    from rag.sync import ContentSyncWorker
+    from reachy_mini_conversation_app.rag.store import VectorStore
+    from reachy_mini_conversation_app.rag.embeddings import Embeddings
+    from reachy_mini_conversation_app.rag.sync import ContentSyncWorker
 
     logger.info("Initializing RAG system...")
 
     vector_store = VectorStore("./data/qdrant")
-    embeddings = Embeddings(api_key=os.getenv("OPENAI_API_KEY"))
+
+    openai_api_key = os.getenv("OPENAI_API_KEY")
+    if not openai_api_key:
+        logger.error("OPENAI_API_KEY is required for RAG embeddings")
+        sys.exit(1)
+
+    embeddings = Embeddings(api_key=openai_api_key)
 
     sync_worker = ContentSyncWorker(
         content_dir="./data/rag_sources",
@@ -134,8 +137,11 @@ def run(
     sync_worker.start()
     sync_worker.ready.wait()
 
+    if sync_worker.error is not None:
+        logger.error("RAG sync failed: %s", sync_worker.error)
+        sys.exit(1)
+
     logger.info("RAG ready")
-    #------------------
 
     deps = ToolDependencies(
         reachy_mini=robot,
@@ -197,7 +203,6 @@ def run(
 
         app = gr.mount_gradio_app(app, stream.ui, path="/")
     else:
-        # In headless mode, wire settings_app + instance_path to console LocalStream
         stream_manager = LocalStream(
             handler,
             robot,
@@ -205,7 +210,6 @@ def run(
             instance_path=instance_path,
         )
 
-    # Each async service → its own thread/loop
     movement_manager.start()
     head_wobbler.start()
     if camera_worker:
@@ -239,13 +243,11 @@ def run(
         if vision_manager:
             vision_manager.stop()
 
-        # Ensure media is explicitly closed before disconnecting
         try:
             robot.media.close()
         except Exception as e:
             logger.debug(f"Error closing media during shutdown: {e}")
 
-        # prevent connection to keep alive some threads
         robot.client.disconnect()
         time.sleep(1)
         logger.info("Shutdown complete.")
@@ -263,9 +265,6 @@ class ReachyMiniConversationApp(ReachyMiniApp):  # type: ignore[misc]
         asyncio.set_event_loop(loop)
 
         args, _ = parse_args()
-
-        # is_wireless = reachy_mini.client.get_status()["wireless_version"]
-        # args.head_tracker = None if is_wireless else "mediapipe"
 
         instance_path = self._get_instance_path().parent
         run(
